@@ -1,0 +1,643 @@
+      SUBROUTINE(USERREC,FLD,EMSG,NEWKEY,KEYLIST)
+$INCLUDE GEN.INCL COMM.INIT
+*---------------------------------------------------------------------
+* Module   : Sales
+* Program  : SLSP4000
+* Function : Sales Quote
+* Copyright (c) 2004 PumaTech Software Solutions CC. All Rights Reserved
+*---------------------------------------------------------------------
+      EMSG='' ; EFLD='' ; EROW='' ; NEWKEY='' ; KEYLIST=''
+      CALL OPEN.GENFILE(EMSG) ; IF EMSG#'' THEN GO 999
+      CALL OPEN.DRSFILE(EMSG) ; IF EMSG#'' THEN GO 999
+      CALL OPEN.HIRFILE(EMSG) ; IF EMSG#'' THEN GO 999
+      CALL OPEN.INVFILE(EMSG) ; IF EMSG#'' THEN GO 999
+      CALL OPEN.SLSFILE(EMSG) ; IF EMSG#'' THEN GO 999
+      CALL OPEN.CRSFILE(EMSG) ; IF EMSG#'' THEN GO 999
+      READ PARMS(1) FROM SLSFILE(60),'SLSP4050' ELSE PARMS(1)=''
+*
+      CALL GET.THIS.BRN(THIS.BRN)
+*
+100:*----- Start Processing
+      IF FLD<40>='REJ' THEN
+         IF TRIM(FLD<41>)='' THEN EFLD=11 ; GO 998
+      END ELSE
+         IF FLD<40>#'CTO' THEN
+            IF FLD<40>#'WFA' THEN
+               FLD<40>='OPN'
+            END
+         END
+      END
+*
+      CFLAG=FLD<40>                      ; * Convert
+      CUST=FLD<4>
+      READ CUSTM FROM DRSFILE(4),CUST ELSE CUSTM=''
+      READ SITEM FROM HIRFILE(2),FLD<2> ELSE SITEM=''
+      IF CFLAG='CTO' THEN
+         IF CUSTM='' THEN EFLD=7 ; GO 998
+*          IF FLD<2>='' THEN EFLD=13 ; GO 998
+         IF FLD<2>='NEW' THEN FLD<2>=''
+	      IF FIELD(SITEM<3>,'*',2)='I' THEN
+	         EMSG='Site Is Inactive' ; GO 999
+	      END
+	      IF FIELD(CUSTM<3>,'*',2)='I' THEN
+	         EMSG='Customer Is Inactive' ; GO 999
+	      END
+	      IF CUSTM<37>='Y' THEN
+	         EMSG='Customer Is On Hold' ; GO 999
+	      END
+      END
+      IF CFLAG='WFA' THEN
+         IF CUSTM='' THEN EFLD=12 ; GO 998
+      END
+*       IF CUSTM<32>='Y' THEN
+*          IF TRIM(FLD<9>)='' THEN
+*             EMSG='Customer Order Number Required' ; GO 999
+*          END
+*          IF OCONV(FLD<9>,'MCU')='REQUIRED' THEN
+*             EMSG='Customer Order Number Required' ; GO 999
+*          END
+*       END
+*
+      IF ICONV(FLD<12>,'D/E')='' THEN EFLD=1 ; GO 998
+      IF ICONV(FLD<13>,'D/E')='' THEN EFLD=2 ; GO 998
+      IF ICONV(FLD<14>,'D/E')='' THEN EFLD=3 ; GO 998
+*
+      IF FLD<1>='' THEN FLD<1>='N'
+      IF FLD<1>#'N' THEN
+         READ SOQTH FROM SLSFILE(7),FLD<1> ELSE SOQTH=''
+      END
+      STYPE=FIELD(FLD<18>,' ',1)			; * Site Type Biling
+      IF STYPE='PP' THEN
+      	IF FLD<65>= "" THEN EFLD=14  ; GO 998
+      END
+*
+      I=0 ; GREC='' ; DFLAG='N'; FSCFLAG='' ; NFSC=0 ; YFSC=0
+      FCNT=DCOUNT(FLD<30>,CHAR(253))
+      FOR F=1 TO FCNT
+         IF FLD<30,F>='' THEN GO 120
+         IF FLD<33,F>+0=0 THEN GO 120
+         IF FIELD(FLD<32,F>,' ',1)='' THEN EFLD=5 ; GO 998
+*
+		 IF FLD<30,F>#'N' THEN
+	         CALL CHECK.PARTM(FLD<30,F>,EMSG)
+	         IF EMSG#'' THEN GO 999
+         END ELSE
+         	IF FLD<38,F>='' THEN EFLD=16 ; GO 998
+         END
+*
+		 READ PARTM FROM INVFILE(3),FLD<30,F> ELSE PARTM=''
+		 IF PARTM<83>='Y' THEN
+		 	YFSC=YFSC+1
+		 END ELSE
+		 	NFSC=NFSC+1
+		 END
+         I=I+1
+         GREC<1,I>=FLD<30,F>             ; * Part
+         GREC<2,I>=FLD<31,F>             ; * Description
+         GREC<3,I>=FIELD(FLD<32,F>,' ',1)          ; * Location
+         GREC<4,I>=FLD<33,F>+0           ; * Ord Qty
+         GREC<5,I>=ICONV(FLD<34,F>,'MR4')+0        ; * Price
+		 GREC<6,I>=FLD<36,F>			 ; * Line Discount
+		 GREC<7,I>=FLD<70,F>			 ; * FSC Flag
+		 GREC<7,I>=FLD<70,F>			 ; * FSC Flag
+		 GREC<8,I>=ICONV(FLD<37,F>,'MR4')+0			 ; * COST
+		 GREC<9,I>=FLD<38,F>			 ; * Line Comment
+		 GREC<10,I>=FLD<39,F>			 ; * Local Buy Out Y/N
+		 GREC<11,I>=ICONV(FLD<72,F>,'MR4')			 ; * Mass
+		 GREC<12,I>=FLD<73,F>			 ; * Prefer Supplier
+120:*----- Next Product
+      NEXT F
+	  IF NFSC GT 0 THEN
+      	IF YFSC GT 0 THEN
+      		EFLD=15 ; GO 998
+      	END
+      END
+      IF YFSC GT 0 THEN
+      	FSCFLAG='Y'
+      END ELSE
+      	FSCFLAG='N'
+      END
+      IF GREC<1>='' THEN EFLD=6 ; GO 998
+*
+*----- Additional Charges
+      QCHG='' ; ACHG='' ; J=0
+      ACNT=DCOUNT(FLD<20>,CHAR(253))
+      FOR A=1 TO ACNT
+         IF ICONV(FLD<22,A>,'MR2')+0=0 THEN GO 140
+         J=J+1
+         QCHG<1,J>='ACHG*':FIELD(FLD<20,A>,' ',1)  ; * Chg Type
+         QCHG<2,J>=FLD<23,A>:'*':FIELD(FLD<21,A>,' ',1)      ; * Chg Code
+         QCHG<3,J>=ICONV(FLD<22,A>,'MR2')          ; * Amt
+         IF CFLAG='CTO' THEN
+            ACHG<1,J>=FIELD(FLD<20,A>,' ',1)       ; * Chg Type
+            ACHG<2,J>=FIELD(FLD<21,A>,' ',1)       ; * Chg Code
+            ACHG<3,J>=ICONV(FLD<22,A>,'MR2')       ; * Amt
+            ACHG<4,J>=FLD<23,A>          ; * Code
+         END
+140:*
+      NEXT A
+*
+      SQTNBR=FLD<1>
+      IF SQTNBR='N' THEN
+         CALL GET.SLSNEXT('SOQT','SOQTH',7,'',SQTNBR)
+         FLD<1>=SQTNBR
+         SOQTH=''
+         NEWKEY='Assigned Quotation Number Is ':SQTNBR
+      END ELSE
+         FN='SOQTH' ; KEY=SQTNBR ; GOSUB 996
+         READ SOQTH FROM SLSFILE(7),SQTNBR ELSE SOQTH=''
+      END
+*
+*----- Start Updating
+      SOQTH<1>=CFLAG                     ; * Open/Accept/Reject
+      SOQTH<2>=FLD<2>                    ; * Site
+      SOQTH<3>=FLD<3>                    ; * Site Name
+      SOQTH<4>=FLD<4>                    ; * Customer
+      SOQTH<5>='TTYPE*':FIELD(FLD<5>,' ',1)
+      SOQTH<6>='TAX*':FIELD(FLD<6>,' ',1)
+      SOQTH<7>=CUSTM<28>                 ; * Terms
+      SOQTH<8>='DISC*':FIELD(FLD<8>,' ',1)
+      SOQTH<9>=FLD<9>                    ; * Cust Order
+      SOQTH<10>='SLS*':FIELD(FLD<10>,' ',1)
+      SOQTH<11>='BAREA*':FIELD(FLD<11>,' ',1)
+      SOQTH<12>=ICONV(FLD<12>,'D/E')     ; * Order
+      SOQTH<13>=ICONV(FLD<13>,'D/E')     ; * Required
+      SOQTH<14>=ICONV(FLD<14>,'D/E')     ; * Promised
+      IF SOQTH<16>='' THEN
+         SOQTH<16>=DATE()                ; * Entry Date
+         SOQTH<17>=TIME()                ; * Entry Time
+         SOQTH<18>=PARMS(50)<1>          ; * Entry User
+      END
+      SOQTH<52>=OCONVS(FLD<19>,'MCT')	 ; * Address
+*
+      SOQTH<20>=OCONVS(FLD<16>,'MCT')    ; * Comment
+      SOQTH<24>='STYPE*':FIELD(FLD<18>,' ',1)
+      IF CUST='NEW' OR CUST='' THEN
+      	SOQTH<44>=FLD<48>					 ; * Cust Name
+      END
+*       IF CUSTM<84>='Y' THEN
+      	SOQTH<44>=FLD<48>					 ; * Cust Name
+*       END
+      SOQTH<45>=FLD<49>					 ; * Cust Contact
+      SOQTH<46>=FLD<50>					 ; * Designation
+      IF FLD<47>#'' THEN
+      	SOQTH<47>=FLD<51>					 ; * Cust Tel
+      END
+      IF FLD<52>#'' THEN
+      	SOQTH<48>=FLD<52>					 ; * Cust Fax
+      END
+      SOQTH<49>=FLD<53>					 ; * Cust Cell
+      SOQTH<50>=FLD<54>					 ; * Cust A/H Nbr
+      SOQTH<51>=FLD<55>      			 ; * Cust Email
+      IF FLD<57>#'' THEN
+      	SOQTH<53>=FLD<57>					 ; * Cust Del Addr
+      END
+      SOQTH<54>=FLD<60>					 ; * Cust Pos Addr
+      SOQTH<55>=FLD<61>					 ; * Site Tel
+      SOQTH<56>=FLD<62>					 ; * Site Fax
+      SOQTH<57>=FLD<63>					 ; * Site Cell
+      SOQTH<58>=FLD<64>					 ; * Site Addr
+*
+	  IF STYPE='PP' THEN 					; * Prepaid Sales
+      	SOQTH<62>='Y'
+      	SOQTH<63>='PPNV*':FIELD(FLD<65>,' ',1)
+      END ELSE
+      	SOQTH<62>='N'
+      	SOQTH<63>=''
+      END
+	  IF FLD<67>#'' THEN
+      	SOQTH<64>=FLD<67>
+      END
+      IF FLD<68>#'' THEN
+      	SOQTH<65>=FLD<68>
+      END
+      SOQTH<66>=FSCFLAG
+*
+      IF STYPE='PS' THEN SOQTH<61>='Y' ELSE SOQTH<61>='N'		   ; * Provisonal Sales
+
+*----- Update Products
+      DCNT=SOQTH<23>+0
+      FOR I=1 TO DCNT
+         DELETE SLSFILE(8),SQTNBR:'*':I
+      NEXT I
+      SOQTH<23>=0
+*
+*----- Convert Quotation
+      ORDNBR=''
+      IF CFLAG='CTO' THEN
+         IF ORDNBR='' THEN
+            CALL GET.SLSNEXT('SORD','SORDH',2,'',ORDNBR)
+            FLD<50>=ORDNBR
+            IF NEWKEY#'' THEN
+               NEWKEY=NEWKEY:' ; '
+            END
+            NEWKEY=NEWKEY:'Assigned Order Number Is ':ORDNBR
+         END
+*
+         SORDH=''
+		  IF STYPE='PP' THEN
+		  	SORDH<1>='U'                       ; * PrepPaid
+		  END ELSE
+	      	SORDH<1>='O'                       ; * Open
+	      END
+         SORDH<2>=FLD<2>                 ; * Site
+         SORDH<3>=FLD<3>                 ; * Site Name
+         SORDH<4>=FLD<4>                 ; * Customer
+         SORDH<5>='TTYPE*':FIELD(FLD<5>,' ',1)
+         SORDH<6>='TAX*':FIELD(FLD<6>,' ',1)
+         SORDH<7>=CUSTM<28>              ; * Terms
+         SORDH<8>='DISC*':FIELD(FLD<8>,' ',1)
+         SORDH<9>=FLD<9>                 ; * Cust Order
+         SORDH<10>='SLS*':FIELD(FLD<10>,' ',1)
+         SORDH<11>='BAREA*':FIELD(FLD<11>,' ',1)
+         SORDH<12>=ICONV(FLD<12>,'D/E')  ; * Order
+         SORDH<13>=ICONV(FLD<13>,'D/E')  ; * Required
+         SORDH<14>=ICONV(FLD<14>,'D/E')  ; * Promised
+         ARDATE=ICONV(FLD<16>,'D/E')			 ; * Promise Date
+         SORDH<16>=DATE()                ; * Entry Date
+         SORDH<17>=TIME()                ; * Entry Time
+         SORDH<18>=PARMS(50)<1>          ; * Entry User
+         SORDH<20>=SOQTH<20>             ; * Comment
+         SORDH<24>='STYPE*':FIELD(FLD<18>,' ',1)
+         SORDH<26>=SQTNBR
+         SORDH<27>=FLD<27>[1,1]          ; * Tran Chrg Type
+         SORDH<28>=ICONV(FLD<28>,'MR4')  ; * Rate/Charge
+         IF STYPE='PP' THEN 					; * Prepaid Sales
+	      SORDH<33>='Y'
+	      SORDH<35>='PPNV*':FIELD(FLD<65>,' ',1)
+	     END ELSE
+	      SORDH<33>='N'
+	      SORDH<35>=''
+	     END
+		 IF CUSTM<84>='Y' THEN
+		     SORDH<44>=SOQTH<44>
+		     SORDH<45>=SOQTH<64>
+		     SORDH<46>=SOQTH<65>
+		     SORDH<47>=SOQTH<52>
+		     SORDH<49>=SOQTH<47>
+		     SORDH<50>=SOQTH<48>
+	     END
+	     SORDH<51>=SOQTH<66>
+*
+	     IF STYPE='PS' THEN SORDH<32>='Y' ELSE SORDH<32>='N'		   ; * Provisonal Sales
+*
+*------Create Delivery Source
+		 IF FLD<66>='Y' THEN
+			 IF SORDH<25>='' THEN
+				STSRC=''
+				CALL GET.SLSNEXT('SDELS','STSRC','4;6','',SDELNBR)
+				   NEWKEY=NEWKEY:'.Assigned Delivery Is ':SDELNBR
+				   KEYLIST<1,-1>='SDELS'
+				   KEYLIST<2,-1>=SDELNBR
+			 END ELSE
+				FN='STSRC' ; KEY=SDELNBR ; GOSUB 996
+				READ STSRC FROM SLSFILE(6),SDELNBR ELSE STSRC=''
+			 END
+			 STSRC<1>=CUST                   ; * Customer
+			 STSRC<2>=FLD<2>                 ; * Site
+			 STSRC<3>=FLD<3>                 ; * Site Name
+			 STSRC<4>='SINV'                ; * Type
+			 STSRC<5>=ORDNBR
+			 STSRC<6>=OCONVS(FLD<16>,'MCT')   ; * Comment
+			 IF STSRC<8>='' THEN
+				STSRC<8>=DATE()              ; * Entry Date
+				STSRC<9>=TIME()              ; * Entry Time
+				STSRC<10>=PARMS(50)<1>       ; * Entry User
+			 END
+			 WRITE STSRC ON SLSFILE(6),SDELNBR
+			 FN='STSRC' ; KEY=SDELNBR ; GOSUB 997
+*
+	         LOCATE(SDELNBR,SORDH,25;POS) ELSE
+	            SORDH<25,-1>=SDELNBR
+	         END
+		 END
+*------
+      END
+*
+      PCNT=DCOUNT(GREC<1>,CHAR(253))
+      FOR P=1 TO PCNT
+         PART=GREC<1,P>
+         WHL=GREC<3,P>
+         OQTY=GREC<4,P>
+         PRICE=GREC<5,P>
+         USAGE=''
+         GOSUB 600                       ; *----- Update Details
+      NEXT P
+*
+      SOQTH<25>=ORDNBR                   ; * Order Number
+      SOQTH<26>=FLD<15>                  ; * Manual
+*
+*----- Additional Charges
+      SOQTH<27>=QCHG<1>                  ; * Charge Type
+      SOQTH<28>=QCHG<2>                  ; * Charge Code
+      SOQTH<29>=QCHG<3>                  ; * Charge Amount
+*
+      SOQTH<30>=FLD<17>                  ; * Contact
+      SOQTH<31>=FLD<27>[1,1]             ; * Tran Chrg Type
+      SOQTH<32>=ICONV(FLD<28>,'MR4')     ; * Rate/Charge
+*
+      IF CFLAG#'OPN' THEN
+         SOQTH<33>=FLD<41>               ; * Rej Reason
+         SOQTH<34>=DATE()                ; * Acc/Rej Date
+         SOQTH<35>=TIME()                ; * Acc/Rej Time
+         SOQTH<36>=PARMS(50)<1>          ; * Acc/Rej User
+      END
+*
+*----- Totals
+      SOQTH<38>=ICONV(FLD<42>,'MR2,')                  ; * Gross Products
+      SOQTH<39>=ICONV(FLD<43>,'MR2,')                  ; * Discount
+      SOQTH<40>=ICONV(FLD<44>,'MR2,')                  ; * Sub Total
+      SOQTH<41>=ICONV(FLD<45>,'MR2,')                  ; * Additions
+      SOQTH<42>=ICONV(FLD<46>,'MR2,')                  ; * VAT
+      SOQTH<43>=ICONV(FLD<47>,'MR2,')                  ; * Total Invoice
+*
+      WRITE SOQTH ON SLSFILE(7),SQTNBR
+      FN='SOQTH' ; KEY=SQTNBR ; GOSUB 997
+*
+      IF CFLAG='CTO' THEN
+         CALL UPD.STADD(SORDH<6>,SORDH<5>,ORDNBR,ACHG,SORDH,21)
+
+	      IF STYPE='PP' THEN
+		      READ DISCF FROM GENFILE(1),SORDH<8> ELSE DISCF=''
+		      DISPCT=ICONV(DISCF<2>,'MR2')
+		      DIS.AMT=OCONV(VAL.ORDER*DISPCT,'MR04')
+		      NET.AMT=VAL.ORDER-DIS.AMT
+		      ACH.VAL=SUM(ACHG<14>)+0
+		      SORDH<22>=OCONV(NET.AMT+ACH.VAL,'MR2')					 ; * Order Value
+	      END
+
+         WRITE SORDH ON SLSFILE(2),ORDNBR
+         FN='SORDH' ; KEY=ORDNBR ; GOSUB 997
+      END
+*
+*----- Update Quote Approval File
+      IF CFLAG='WFA' THEN
+         FN='QTAPP' ; KEY=SQTNBR:'*SOQTH' ; GOSUB 996
+         READ QTAPP FROM DRSFILE(22),SQTNBR:'*SOQTH' ELSE QTAPP=''
+         QTAPP<1>=CFLAG
+         QTAPP<2>='BRN*':THIS.BRN
+         QTAPP<3>=FLD<4>
+         QTAPP<4>=FLD<2>
+         QTAPP<5>='SALE'
+         QTAPP<6>=PARMS(50)<49>
+         QTAPP<7>=PARMS(50)<49>
+         QTAPP<8>='SLS*':FIELD(FLD<10>,' ',1)
+         WRITE QTAPP ON DRSFILE(22),SQTNBR:'*SOQTH'
+         FN='QTAPP' ; KEY=SQTNBR:'*SOQTH' ; GOSUB 997
+      END
+*
+      IF CFLAG='REJ' THEN
+         READ QTAPP FROM DRSFILE(22),SQTNBR:'*SOQTH' THEN
+            DELETE DRSFILE(22),SQTNBR:'*SOQTH'
+         END
+      END
+*
+      IF CFLAG='CTO' THEN
+         READ QTAPP FROM DRSFILE(22),SQTNBR:'*SOQTH' THEN
+            DELETE DRSFILE(22),SQTNBR:'*SOQTH'
+         END
+      END
+*
+	IF FLD<58>='SOQP' THEN
+	   KEYLIST<1,-1>='SOQP'
+       KEYLIST<2,-1>=SQTNBR
+	END ELSE
+      KEYLIST<1,-1>='SOQT'
+      KEYLIST<2,-1>=SQTNBR
+      IF CFLAG='CTO' THEN
+       KEYLIST<1,-1>='SORD'
+       KEYLIST<2,-1>=ORDNBR
+      END
+    END
+*
+      CALL UPD.GEN.CHNG('SLSP4000',FLD)
+      GO 999
+*
+600:*----- Update Details
+      READ PARTM FROM INVFILE(3),PART ELSE PARTM=''
+      READ PARTC FROM INVFILE(5),PART ELSE PARTC=''
+      IF PARTM<13>='U' THEN
+         DESC=OCONV(USAGE,'MR2'):FIELD(PARTM<5>,'*',2):' ':DESC
+      END
+*
+      SOQTH<23>=SOQTH<23>+1
+      DETKEY=SQTNBR:'*':SOQTH<23>
+      FN='SOQTD' ; KEY=DETKEY ; GOSUB 996
+      READ SOQTD FROM SLSFILE(8),DETKEY ELSE SOQTD=''
+      QDETKEY=DETKEY
+*
+      SOQTD<1>=CFLAG                     ; * Open/Accept/Reject
+      SOQTD<2>=PART
+      SOQTD<4>='WHL*':WHL
+      IF SOQTD<5>='' THEN
+         SOQTD<5>=OQTY                   ; * Initial Order
+      END
+      SOQTD<6>=OQTY
+      SOQTD<8>=PRICE
+      IF PARTC<6>+0#0 THEN
+         IF PRICE#PARTC<6> THEN
+            SOQTD<9>='Y'                 ; * Override
+         END
+      END
+	  LDIS=FIELD(GREC<6,P>,' ',1)		; * Discount
+      SOQTD<12>='DISCS*':LDIS
+      SOQTD<13>=GREC<7,P>				; * FSC Flag
+      SOQTD<14>=GREC<2,P>				; * Desctipion
+      SOQTD<15>=GREC<8,P>				; * Cost
+      SOQTD<17>=GREC<9,P>				; * Line comment
+      SOQTD<18>=GREC<10,P>				; * Local Buyout Y/N
+      SOQTD<19>=GREC<11,P>				; * Mass
+      SOQTD<21>=GREC<12,P>				; * Pref Supplier
+*
+      WRITE SOQTD ON SLSFILE(8),DETKEY
+      FN='SOQTD' ; KEY=DETKEY ; GOSUB 997
+*
+      IF CFLAG='CTO' THEN
+         IF PARTM<12>='Y' THEN
+            QTY=1 ; QCNT=OQTY
+         END ELSE
+            QTY=OQTY ; QCNT=1
+         END
+         FOR Q=1 TO QCNT
+            SORDH<23>=SORDH<23>+1
+            DETKEY=ORDNBR:'*':SORDH<23>
+            FN='SORDD' ; KEY=DETKEY ; GOSUB 996
+            READ SORDD FROM SLSFILE(3),DETKEY ELSE SORDD=''
+            IF STYPE='PP' THEN
+			  SORDD<1>='U'                       ; * PrepPaid
+			END ELSE
+		      SORDD<1>='O'                       ; * Open
+		    END
+
+		    IF PART='N' THEN
+		    	GOSUB 700
+		    END
+
+            SORDD<2>=PART
+            SORDD<4>='WHL*':WHL
+            SORDD<5>=QTY                 ; * Initial Order
+            SORDD<6>=QTY
+            SORDD<7>=0
+            SORDD<8>=PRICE
+            SORDD<20>=SOQTD<17>
+            SORDD<21>=PRICE
+            SORDD<22>=SOQTD<15>
+			SORDD<23>=SOQTD<12>
+            IF PARTC<6>+0#0 THEN
+               IF PRICE#PARTC<6> THEN
+                  SORDD<9>='Y'           ; * Override
+               END
+            END
+            IF STYPE='PP' THEN
+		  		ITEM.TOTAL=QTY*PRICE+0
+		  		SORDD<25>=ITEM.TOTAL
+		  		VAL.ORDER=VAL.ORDER+ITEM.TOTAL
+		  	END
+		  	READ PARTM FROM INVFILE(3),PART ELSE PARTM=''
+		  	IF PARTM<83>='Y' THEN
+		  		SORDD<34>='Y'
+		  	END ELSE
+		  		SORDD<34>='N'
+		  	END
+		  	SORDD<35>=SOQTD<18>[1,1]
+		  	SORDD<37>=SOQTD<21>
+		  	IF SORDD<35>='Y' THEN
+			  	PSUPP=SORDD<37>
+* 		  		CALL GET.CRSNEXT('POREQ','POREQ','','',REQNBR)
+* 		  		GOSUB 750
+		  	END
+*
+            WRITE SORDD ON SLSFILE(3),DETKEY
+            FN='SORDD' ; KEY=DETKEY ; GOSUB 997
+            IF PARTM<12>='N' THEN
+               CALL UPD.IVBAL.OUT(PART,THIS.BRN,WHL,QTY)
+            END
+         NEXT Q
+      END
+*
+      RETURN
+*
+700:*----- Create BUY OUT Part
+	  READ CFINV FROM INVFILE(1),'CTDEF*01' ELSE RETURN
+	  NREC=''
+      NREC<1>=SOQTD<14>                    ; * Description
+      NREC<2>='PSTA*A'          ; * Status
+      NREC<3>='PLINE*':CFINV<2>         ; * Prod Line
+	  NREC<4>='PCLAS*':CFINV<3>          ; * Class
+	  IF SOQTD<19>='' THEN
+	  	NREC<6>=ICONV(0,'MR4')        ; * Weight
+	  END ELSE
+	  	NREC<6>=SOQTD<19>        ; * Weight
+	  END
+	  READ CFPLN FROM INVFILE(1),NREC<3> ELSE CFPLN=''
+
+	  NREC<8>='TTYPE*':CFINV<4>         ; * Tax Type
+      READ CFREC FROM GENFILE(4),NREC<8> ELSE EFLD=9 ; GO 998
+*
+      NREC<9>='TAX*':CFINV<5>           ; * Tax
+      READ CFREC FROM GENFILE(4),NREC<9> ELSE
+      	READ BRNMF FROM GENFILE(6),THIS.BRN ELSE BRNMF=''
+      	NREC<9>=BRNMF<10>
+      	READ CFREC FROM GENFILE(4),NREC<9> ELSE EFLD=10 ; GO 998
+      END
+      NREC<10>='CYCLE*':CFINV<7>       ; * Stock Count
+	  NREC<12>=CFINV<6>
+      NREC<24>=DATE()                ; * Create Date
+      NREC<25>=TIME()                ; * Create Time
+      NREC<26>=PARMS(50)<1>          ; * Created User
+      NREC<33>='IVDPR*':CFINV<8>   ; * Depr Policy
+      NREC<60>=CFINV<9>
+      NREC<64>='CGRP*':CFINV<10>
+*
+  	  IF CFPLN<20>='Y' THEN
+  	 	CALL GET.INVNEXT.PLINE(CFPLN<21>:'PART','PARTM','3;31',CFPLN<21>,PART)
+  	  END ELSE
+     	CALL GET.INVNEXT('PART','PARTM','3;31','',PART)
+      END
+
+      WRITE NREC ON INVFILE(3),PART
+      FN='PARTM' ; KEY=PART ; GOSUB 997
+
+*----- Update The Costs
+      FN='PARTC' ; KEY=PART ; GOSUB 996
+      READ PARTC FROM INVFILE(5),PART ELSE PARTC=''
+*----- Part Std Cost
+      PARTC<3>=SOQTD<15>      ; * Material
+      PARTC<4>=ICONV(0,'MR4')      ; * Labour
+      PARTC<5>=ICONV(0,'MR4')      ; * Overhead
+      PARTC<1>=PARTC<3>+PARTC<4>+PARTC<5>          ; * Std
+      IF PARTC<2>+0=0 THEN
+         PARTC<2>=PARTC<1>               ; * PO Cost
+      END
+*
+      PARTC<6>=PRICE      ; * Sell
+*
+      WRITE PARTC ON INVFILE(5),PART
+      FN='PARTC' ; KEY=PART ; GOSUB 997
+*
+      CALL INVDXREF('PARTX',OREC,PART,4)
+      CALL INVAUDIT('PARTM',PARTM,OFLD,PART,3,3,1)
+      CALL INVAUDIT('PARTC',PARTC,OPARTC,PART,5,5,1)
+
+	  CALL INVBXREF('PARTX',PARTM,PART,4)
+*
+      FN='SOQTD' ; KEY=QDETKEY ; GOSUB 996
+      READ SOQTD FROM SLSFILE(8),QDETKEY ELSE SOQTD=''
+	  SOQTD<16>=PART
+      WRITE SOQTD ON SLSFILE(8),QDETKEY
+      FN='SOQTD' ; KEY=QDETKEY ; GOSUB 997
+
+	  RETURN
+*
+750:*----- Create PO Request
+* 	  SEQ=SEQ+1
+*       PDETKEY=REQNBR:'*':SEQ
+*       FN='POREQ' ; KEY=PDETKEY ; GOSUB 996
+*       READ POREQ FROM CRSFILE(20),PDETKEY THEN
+*          GOSUB 997 ; GO 750
+*       END
+* *
+*       READ PARTM FROM INVFILE(3),PART ELSE PARTM=''
+*       IF PARTM<13>='U' THEN
+*          DESC=OCONV(USAGE,'MR2'):FIELD(PARTM<5>,'*',2):' ':DESC
+*       END
+* *
+*       POREQ=''
+*       POREQ<1>='O'                       ; * Open
+*       POREQ<2>=PART
+*       POREQ<4>=PART
+*       POREQ<5>=DESC
+*       POREQ<6>='WHL*':WHL
+*       POREQ<7>=QTY
+*       POREQ<8>=SORDD<20>                      ; * Line Comment
+*       POREQ<9>=USAGE
+*       POREQ<10>=ICONV(FLD<12>,'D/E')      ; * Order
+*       POREQ<11>=ICONV(FLD<13>,'D/E')      ; * Required
+*       POREQ<12>='BRN*':THIS.BRN
+*       POREQ<14>=DATE()                   ; * Enter Date
+*       POREQ<15>=TIME()                   ; * Enter Time
+*       POREQ<16>=PARMS(50)<1>             ; * Entry User
+*       POREQ<18>=''            ; * Stamp
+*       POREQ<19>='Y'             ; * BuyOut
+*       POREQ<20>=DETKEY			 ; * FREQD Key
+*       POREQ<21>=ARDATE
+*       POREQ<26>=PSUPP			 ; * Prefered Supplier
+* *
+*       WRITE POREQ ON CRSFILE(20),PDETKEY
+*       FN='POREQ' ; KEY=PDETKEY ; GOSUB 997
+
+	  RETURN
+996:*----- Lock Subroutine
+      CALL USER.LOCK(FN,KEY)
+      RETURN
+*
+997:*----- Unlock Subroutine
+      CALL USER.UNLOCK(FN,KEY)
+      RETURN
+*
+998:*----- Errors
+      EMSG=PARMS(1)<EFLD>:EROW
+*
+999:*----- Exit
+      CALL USER.RELEASE
+      RETURN
